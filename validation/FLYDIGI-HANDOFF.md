@@ -49,3 +49,26 @@ query timing and suppression of discovery traffic while the joystick is open.
 The live candidate loaded successfully and restored one native Steam controller
 and roughly 500 raw reports per second. Physical off/on and startup with the
 controller off still require validation before rebuilding/promoting the image.
+
+## Silence caused an unbounded acquisition loop
+
+The next physical off/on test failed. A five-second USB capture contained 1,102
+acquisition requests and 1,103 identity requests, with no input reports. The
+100 ms receive timeout reset the heartbeat deadline on every event-loop pass,
+so unanswered requests were retried continuously instead of every 30 seconds.
+This behavior existed in the original heartbeat code; asynchronous discovery
+alone did not fix it. The capture proves the flood, but does not establish
+whether it caused the initial wireless failure.
+
+An open controller now retries after silence at most once per second, measured
+from the last attempt even when the write fails. Normal input retains the
+30-second heartbeat. Recovery also requests mapping status. Availability is
+reconciled against the actual joystick list, and each received packet refreshes
+its joystick pointer in case the preceding packet disconnected the device.
+
+The C replay test covers ten seconds of silence at a 500 Hz event-loop rate,
+resumed input, the normal heartbeat and failed writes. The new live build showed
+only ten discovery rounds during a ten-second capture. At that point identity
+replies were present, but mapping-status replies and raw input remained absent;
+physical recovery was not yet confirmed. Do not interpret the bounded traffic
+check as a successful reconnect test.

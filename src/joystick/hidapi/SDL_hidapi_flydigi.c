@@ -100,6 +100,7 @@ typedef struct
     float accelScale;
     float gyroScale;
     Uint64 next_heartbeat;
+    Uint64 last_heartbeat;
     Uint64 last_packet;
     Uint8 last_state[USB_PACKET_LENGTH];
 } SDL_DriverFlydigi_Context;
@@ -283,12 +284,9 @@ static void HIDAPI_DriverFlydigi_SetAvailable(SDL_HIDAPI_Device *device, bool av
 {
     SDL_DriverFlydigi_Context *ctx = (SDL_DriverFlydigi_Context *)device->context;
 
-    if (available == ctx->available) {
-        return;
-    }
-
     if (available) {
         if (device->num_joysticks == 0) {
+            ctx->next_heartbeat = 0;
             HIDAPI_JoystickConnected(device, NULL);
         }
     } else {
@@ -1038,9 +1036,18 @@ static bool HIDAPI_DriverFlydigi_UpdateDevice(SDL_HIDAPI_Device *device)
     }
 
     if (device->vendor_id == USB_VENDOR_FLYDIGI_V2 && joystick) {
-        if (!ctx->next_heartbeat || now >= ctx->next_heartbeat) {
+        // Missing input may mean a wireless reconnect. Retry promptly, but do
+        // not turn the 100 ms input timeout into a write on every event pump.
+        // An unanswered request must still consume the retry interval.
+        const bool input_timeout = now >= ctx->last_packet + 100;
+        const bool retry_due = input_timeout && now >= ctx->last_heartbeat + 1000;
+        if (!ctx->next_heartbeat || now >= ctx->next_heartbeat || retry_due) {
             SDL_HIDAPI_Flydigi_SendAcquireRequest(device, true);
             SDL_HIDAPI_Flydigi_SendInfoRequest(device);
+            if (input_timeout) {
+                SDL_HIDAPI_Flydigi_SendStatusRequest(device);
+            }
+            ctx->last_heartbeat = now;
             ctx->next_heartbeat = now + FLYDIGI_ACQUIRE_CONTROLLER_HEARTBEAT_TIME;
         }
     }
@@ -1050,6 +1057,8 @@ static bool HIDAPI_DriverFlydigi_UpdateDevice(SDL_HIDAPI_Device *device)
         HIDAPI_DumpPacket("Flydigi packet: size = %d", data, size);
 #endif
         ctx->last_packet = now;
+        // A status packet earlier in this batch may have changed the device.
+        joystick = device->num_joysticks > 0 ? SDL_GetJoystickFromID(device->joysticks[0]) : NULL;
 
         if (device->vendor_id == USB_VENDOR_FLYDIGI_V1) {
             HIDAPI_DriverFlydigi_HandlePacketV1(joystick, ctx, data, size);
@@ -1058,17 +1067,9 @@ static bool HIDAPI_DriverFlydigi_UpdateDevice(SDL_HIDAPI_Device *device)
         }
     }
 
-    if (device->vendor_id == USB_VENDOR_FLYDIGI_V2) {
-        // If we haven't gotten a packet in a while, check to make sure we can still acquire it
-        const int INPUT_TIMEOUT_MS = 100;
-        if (now >= (ctx->last_packet + INPUT_TIMEOUT_MS)) {
-            ctx->next_heartbeat = now;
-        }
-    }
-
     if (size < 0 && device->num_joysticks > 0) {
         // Read error, device is disconnected
-        HIDAPI_JoystickDisconnected(device, device->joysticks[0]);
+        HIDAPI_DriverFlydigi_SetAvailable(device, false);
     }
     return (size >= 0);
 }
