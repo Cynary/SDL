@@ -106,6 +106,8 @@ typedef struct
     Uint64 battery_zero_deadline;
     bool battery_zero_query_sent;
     Uint64 last_packet;
+    Uint8 grip_rumble[2];
+    Uint8 trigger_rumble[2];
     Uint8 last_state[USB_PACKET_LENGTH];
 } SDL_DriverFlydigi_Context;
 
@@ -643,6 +645,8 @@ static bool HIDAPI_DriverFlydigi_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joy
     SDL_AssertJoysticksLocked();
 
     SDL_zeroa(ctx->last_state);
+    SDL_zeroa(ctx->grip_rumble);
+    SDL_zeroa(ctx->trigger_rumble);
 
     // Initialize the joystick capabilities
     joystick->nbuttons = SDL_GAMEPAD_NUM_BASE_FLYDIGI_BUTTONS;
@@ -673,6 +677,23 @@ static bool HIDAPI_DriverFlydigi_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joy
     return true;
 }
 
+static bool HIDAPI_DriverFlydigi_SendRumbleV2(SDL_HIDAPI_Device *device, Uint8 grip_left, Uint8 grip_right, Uint8 trigger_left, Uint8 trigger_right)
+{
+    SDL_DriverFlydigi_Context *ctx = (SDL_DriverFlydigi_Context *)device->context;
+    Uint8 packet[] = { FLYDIGI_V2_CMD_REPORT_ID, FLYDIGI_V2_MAGIC1, FLYDIGI_V2_MAGIC2, FLYDIGI_V2_HAPTIC_COMMAND, 6, grip_left, grip_right, trigger_left, trigger_right, 0 };
+    if (device->product_id == USB_PRODUCT_FLYDIGI_V2_VADER) {
+        packet[0] = 0;
+    }
+    if (SDL_HIDAPI_SendRumble(device, packet, sizeof(packet)) != sizeof(packet)) {
+        return SDL_SetError("Couldn't send rumble packet");
+    }
+    ctx->grip_rumble[0] = grip_left;
+    ctx->grip_rumble[1] = grip_right;
+    ctx->trigger_rumble[0] = trigger_left;
+    ctx->trigger_rumble[1] = trigger_right;
+    return true;
+}
+
 static bool HIDAPI_DriverFlydigi_RumbleJoystick(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble)
 {
     if (device->vendor_id == USB_VENDOR_FLYDIGI_V1) {
@@ -684,30 +705,33 @@ static bool HIDAPI_DriverFlydigi_RumbleJoystick(SDL_HIDAPI_Device *device, SDL_J
             return SDL_SetError("Couldn't send rumble packet");
         }
     } else {
-        Uint8 rumble_packet[] = { FLYDIGI_V2_CMD_REPORT_ID, FLYDIGI_V2_MAGIC1, FLYDIGI_V2_MAGIC2, FLYDIGI_V2_HAPTIC_COMMAND, 6, 0, 0, 0, 0, 0 };
-        // The rumble worker writes directly through HIDAPI, bypassing
-        // WritePacket's unnumbered-report fix for the Vader 5 receiver.
-        if (device->product_id == USB_PRODUCT_FLYDIGI_V2_VADER) {
-            rumble_packet[0] = 0;
-        }
-        rumble_packet[5] = low_frequency_rumble >> 8;
-        rumble_packet[6] = high_frequency_rumble >> 8;
-
-        if (SDL_HIDAPI_SendRumble(device, rumble_packet, sizeof(rumble_packet)) != sizeof(rumble_packet)) {
-            return SDL_SetError("Couldn't send rumble packet");
-        }
+        SDL_DriverFlydigi_Context *ctx = (SDL_DriverFlydigi_Context *)device->context;
+        // Each packet replaces all four levels. Preserve the other SDL API's
+        // motors, including when this pair's duration expires and sends zero.
+        return HIDAPI_DriverFlydigi_SendRumbleV2(device, low_frequency_rumble >> 8, high_frequency_rumble >> 8,
+                                               ctx->trigger_rumble[0], ctx->trigger_rumble[1]);
     }
     return true;
 }
 
 static bool HIDAPI_DriverFlydigi_RumbleJoystickTriggers(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, Uint16 left_rumble, Uint16 right_rumble)
 {
-    return SDL_Unsupported();
+    SDL_DriverFlydigi_Context *ctx = (SDL_DriverFlydigi_Context *)device->context;
+    if (device->vendor_id == USB_VENDOR_FLYDIGI_V1 || ctx->deviceID != 130) {
+        return SDL_Unsupported();
+    }
+    return HIDAPI_DriverFlydigi_SendRumbleV2(device, ctx->grip_rumble[0], ctx->grip_rumble[1],
+                                           left_rumble >> 8, right_rumble >> 8);
 }
 
 static Uint32 HIDAPI_DriverFlydigi_GetJoystickCapabilities(SDL_HIDAPI_Device *device, SDL_Joystick *joystick)
 {
-    return SDL_JOYSTICK_CAP_RUMBLE;
+    SDL_DriverFlydigi_Context *ctx = (SDL_DriverFlydigi_Context *)device->context;
+    Uint32 caps = SDL_JOYSTICK_CAP_RUMBLE;
+    if (device->vendor_id != USB_VENDOR_FLYDIGI_V1 && ctx->deviceID == 130) {
+        caps |= SDL_JOYSTICK_CAP_TRIGGER_RUMBLE;
+    }
+    return caps;
 }
 
 static bool HIDAPI_DriverFlydigi_SetJoystickLED(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, Uint8 red, Uint8 green, Uint8 blue)

@@ -116,3 +116,31 @@ other models' report framing unchanged.
 The actual callback replay checks start/stop levels, V1 and other V2 behavior,
 and write errors. Physical vibration and the corrected Steam USB capture are
 separate validation steps.
+
+## Four-motor candidate (October 9)
+
+The official SDK's NewXInput vibration command carries separate left/right grip
+and left/right trigger levels. The previous SDL trigger callback returned
+unsupported. The candidate implements it for confirmed device ID 130 and
+advertises trigger-rumble capability only for that device. Other identities are
+unchanged. Each command carries all four levels, so the callbacks retain the
+other pair's current levels; stopping either pair must not stop the other.
+Cached levels change only when the rumble worker accepts the packet and are
+cleared when opening the joystick.
+
+The callback replay verifies simultaneous levels, independent stop commands,
+failed writes, model capability gating, and unchanged V1/other V2 framing.
+Existing button (12,289 cases), discovery/reconnect and battery replays pass.
+The complete native 32-bit SDL library also builds in the existing image builder.
+Build SHA-256: 773f9edb36ed2595d893375b738676501264424102d052f348da24a1c105e460.
+There is an existing unused GetReply warning. This candidate has not been loaded
+into Steam or physically tested; the installed driver is unchanged.
+
+Next checks: isolated left grip, right grip, left trigger, right trigger; mixed
+levels; stop one pair while the other continues; reconnect with all motors off;
+then verify the streaming path reaches the same callbacks. Firmware vibration
+settings may gate trigger response. Do not infer physical output from a queued
+USB packet or advertise end-to-end support before those checks.
+
+Changes are kept in Cynary's fork. SDL upstream does not accept AI-generated
+contributions; no upstream PR is being submitted.
