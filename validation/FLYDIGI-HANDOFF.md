@@ -102,3 +102,17 @@ The examined Flydigi SDK has only legacy XInput/DInput sleep implementations,
 not a dedicated NewXInput implementation. Do not send NewXInput command 0x16
 as a guessed sleep command: it changes joystick sensitivity in that protocol.
 The Steam menu is therefore not implemented for this device in this setup.
+
+## Rumble framing
+
+Steam Identify reached the receiver, but USB showed `03 5A A5 12 06 7F 7F
+00 00 00` and its stop packet. The Vader receiver uses unnumbered reports:
+HIDAPI needs a zero report-ID byte, which it strips before sending. The existing
+WritePacket helper handled this for configuration, but rumble uses the separate
+asynchronous SDL rumble worker and bypassed that helper. Set the Vader V2
+rumble packet's report-ID byte to zero before queueing it. Keep the worker and
+other models' report framing unchanged.
+
+The actual callback replay checks start/stop levels, V1 and other V2 behavior,
+and write errors. Physical vibration and the corrected Steam USB capture are
+separate validation steps.

@@ -685,6 +685,11 @@ static bool HIDAPI_DriverFlydigi_RumbleJoystick(SDL_HIDAPI_Device *device, SDL_J
         }
     } else {
         Uint8 rumble_packet[] = { FLYDIGI_V2_CMD_REPORT_ID, FLYDIGI_V2_MAGIC1, FLYDIGI_V2_MAGIC2, FLYDIGI_V2_HAPTIC_COMMAND, 6, 0, 0, 0, 0, 0 };
+        // The rumble worker writes directly through HIDAPI, bypassing
+        // WritePacket's unnumbered-report fix for the Vader 5 receiver.
+        if (device->product_id == USB_PRODUCT_FLYDIGI_V2_VADER) {
+            rumble_packet[0] = 0;
+        }
         rumble_packet[5] = low_frequency_rumble >> 8;
         rumble_packet[6] = high_frequency_rumble >> 8;
 
