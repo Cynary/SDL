@@ -88,6 +88,7 @@ typedef struct
     bool has_cz;
     bool has_lmrm;
     bool has_circle;
+    bool has_turbo;
     bool wireless;
     bool sensors_supported;
     bool sensors_enabled;
@@ -264,6 +265,7 @@ static void HIDAPI_DriverFlydigi_UpdateDeviceIdentity(SDL_HIDAPI_Device *device)
         ctx->has_cz = true;
         ctx->has_lmrm = true;
         ctx->has_circle = true;
+        ctx->has_turbo = true;
         ctx->sensors_supported = true;
         ctx->accelScale = SDL_STANDARD_GRAVITY / 4096.0f;
         ctx->gyroScale = DEG2RAD(2000.0f);
@@ -603,6 +605,9 @@ static bool HIDAPI_DriverFlydigi_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joy
     if (ctx->has_circle) {
         joystick->nbuttons += 1;
     }
+    if (ctx->has_turbo) {
+        joystick->nbuttons += 1;
+    }
     joystick->naxes = SDL_GAMEPAD_AXIS_COUNT;
     joystick->nhats = 1;
 
@@ -893,6 +898,9 @@ static void HIDAPI_DriverFlydigi_HandleStatePacketV2(SDL_Joystick *joystick, SDL
         SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_GUIDE, ((data[14] & 0x08) != 0));
         if (ctx->has_circle) {
             SDL_SendJoystickButton(timestamp, joystick, extra_button_index++, ((data[14] & 0x01) != 0));
+        }
+        if (ctx->has_turbo) {
+            SDL_SendJoystickButton(timestamp, joystick, extra_button_index++, ((data[14] & 0x02) != 0));
         }
     }
 
