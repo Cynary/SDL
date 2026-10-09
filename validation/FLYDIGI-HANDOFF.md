@@ -80,12 +80,11 @@ The receiver reported battery byte `00` once during reconnect, then `02` (40%)
 source of the reported warning. We did not capture the warning itself and
 cannot explain the earlier full indication from this sample.
 
-Cache identity-reply battery data before the joystick opens. A native probe
-previously showed unknown for 41 ms before reporting 40%; the changed build
-reports 40% without waiting for another receiver heartbeat. Unknown states use
--1 rather than 0. Publish the cached value on the first normal device update,
-not inside OpenJoystick: the latter passed the standalone probe but left Steam
-showing its initial 100% value because it missed the early notification.
+Identity replies are retained even before the joystick opens. However, publishing
+that value during open or immediately on the next device update left Steam at
+100% despite the driver reporting 40%: the early event was missed. Keep the
+ordinary asynchronous receiver-reply notification instead. Unknown states use
+-1 rather than 0. The early-publication attempt was removed after the Steam check.
 Before publishing an empty battery, request confirmation after two seconds.
 A sustained zero still gets reported. The extra query is attempted once even
 if it fails; ordinary heartbeat requests remain available. Other battery
