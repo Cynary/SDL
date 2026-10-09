@@ -82,7 +82,10 @@ cannot explain the earlier full indication from this sample.
 
 Cache identity-reply battery data before the joystick opens. A native probe
 previously showed unknown for 41 ms before reporting 40%; the changed build
-reports 40% on its first observation. Unknown states use -1 rather than 0.
+reports 40% without waiting for another receiver heartbeat. Unknown states use
+-1 rather than 0. Publish the cached value on the first normal device update,
+not inside OpenJoystick: the latter passed the standalone probe but left Steam
+showing its initial 100% value because it missed the early notification.
 Before publishing an empty battery, request confirmation after two seconds.
 A sustained zero still gets reported. The extra query is attempted once even
 if it fails; ordinary heartbeat requests remain available. Other battery

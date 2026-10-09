@@ -644,8 +644,6 @@ static bool HIDAPI_DriverFlydigi_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joy
 
     SDL_zeroa(ctx->last_state);
 
-    HIDAPI_DriverFlydigi_SendCachedPowerInfo(joystick, ctx);
-
     // Initialize the joystick capabilities
     joystick->nbuttons = SDL_GAMEPAD_NUM_BASE_FLYDIGI_BUTTONS;
     if (ctx->has_cz) {
@@ -1065,6 +1063,9 @@ static bool HIDAPI_DriverFlydigi_UpdateDevice(SDL_HIDAPI_Device *device)
 
     if (device->num_joysticks > 0) {
         joystick = SDL_GetJoystickFromID(device->joysticks[0]);
+        // Publish after OpenJoystick returns, when the application has
+        // registered the device. SDL suppresses unchanged battery events.
+        HIDAPI_DriverFlydigi_SendCachedPowerInfo(joystick, ctx);
     }
 
     if (device->vendor_id == USB_VENDOR_FLYDIGI_V2 && !joystick &&
