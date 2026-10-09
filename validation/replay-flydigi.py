@@ -5,6 +5,7 @@ The parser is extracted from the selected source file, so this can test both
 baseline and candidate builds. Hardware enumeration and Steam UI are separate tests.
 """
 import argparse
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ import tempfile
 parser=argparse.ArgumentParser()
 parser.add_argument('--source',type=Path,default=Path('src/joystick/hidapi/SDL_hidapi_flydigi.c'))
 parser.add_argument('--include',type=Path,default=Path('include'))
+parser.add_argument('--capture',type=Path,help='Replay raw button-change reports from Flydigi Control')
 args=parser.parse_args()
 source=args.source.read_text()
 start=source.index('static void HIDAPI_DriverFlydigi_HandleStatePacketV2(')
@@ -72,6 +74,24 @@ int main(void) {
     printf("PASS: %u mixed, repeated and release reports; Turbo and Fn independent; existing extras unchanged\n",count+1);
 }
 '''
+if args.capture:
+    records = [json.loads(line) for line in args.capture.read_text().splitlines()]
+    packets = [bytes.fromhex(r['raw']) for r in records if r.get('event') == 'buttons']
+    if not packets or any(len(p) != 32 or p[:3] != bytes.fromhex('5aa5ef') for p in packets):
+        raise ValueError('Capture must contain complete 32-byte V2 input reports')
+    declarations = ',\n'.join('{' + ','.join(str(v) for v in packet) + '}' for packet in packets)
+    main = main[:main.index('int main(void)')] + r'''
+static Uint8 captured[][32] = {CAPTURE};
+int main(void) {
+    SDL_DriverFlydigi_Context ctx={.has_cz=true,.has_lmrm=true,.has_circle=true,.has_turbo=true};
+    for (unsigned i=0; i<sizeof(captured)/sizeof(captured[0]); i++) {
+        HIDAPI_DriverFlydigi_HandleStatePacketV2(NULL,&ctx,captured[i],32);
+        check(captured[i][13],captured[i][14]);
+    }
+    printf("PASS: %zu captured physical reports; all ten extra-button states agree\n",
+           sizeof(captured)/sizeof(captured[0]));
+}
+'''.replace('CAPTURE', declarations)
 with tempfile.TemporaryDirectory() as folder:
     folder=Path(folder);c=folder/'replay.c';exe=folder/'replay'
     c.write_text(preamble+handler+main)

@@ -23,9 +23,17 @@ features. Exposing the raw button lets applications choose their own binding.
 - The compiled library's `SDL_GetGamepadMappingForGUID` returns `misc1:b20` and
   preserves all previous mappings for the Vader 5 Pro HIDAPI GUID.
 
-This is not yet installed in Steam. Physical input, Steam's binding UI and both
-Steam library architectures still need validation. The joystick-only build is
-not suitable for replacing Steam's complete SDL library.
+- Complete 32-bit and 64-bit builds also succeed, with all symbols exported by
+  Steam's original SDL libraries present.
+- A physical 60-second button test observed every standard and extra button.
+  Replaying its 184 state changes through the actual SDL parser passes for all
+  ten extra buttons, including independent Fn and Turbo presses.
+
+Steam's binding UI and reconnect behavior still need validation. Simply
+preloading SDL is insufficient: Steam also opens its bundled library by filename.
+A separate loading experiment is being validated in Flydigi Control; the driver
+must not be advertised as fully integrated until Steam receives and maps the
+physical events.
 
 This fork's patch and validation harness were written with Codex. SDL's upstream
 policy prohibits AI-generated code contributions; no upstream PR is being sent.
