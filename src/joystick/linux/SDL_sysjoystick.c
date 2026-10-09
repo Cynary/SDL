@@ -969,8 +969,44 @@ static void LINUX_FallbackJoystickDetect(void)
     }
 }
 
+static bool flydigi_devices_changed;
+
+void LINUX_RefreshFlydigiDevices(void)
+{
+    SDL_AssertJoysticksLocked();
+    flydigi_devices_changed = true;
+}
+
+static void LINUX_ReconcileFlydigiDevices(void)
+{
+    SDL_joylist_item *item, *next, *prev = NULL;
+
+    SDL_AssertJoysticksLocked();
+    if (!flydigi_devices_changed) {
+        return;
+    }
+    // Clear first: enumeration may discover another native availability change.
+    flydigi_devices_changed = false;
+    for (item = SDL_joylist; item; item = next) {
+        next = item->next;
+        if (item->vendor == USB_VENDOR_FLYDIGI_V2 &&
+            SDL_JoystickHandledByAnotherDriver(&SDL_LINUX_JoystickDriver,
+                                              item->vendor, item->product, 0, item->name)) {
+            // Removal recenters open joysticks, including keys held when the
+            // receiver stopped sending XInput reports after native acquisition.
+            RemoveJoylistItem(item, prev);
+        } else {
+            prev = item;
+        }
+    }
+    // Native permission changes do not create a udev or /dev/input event.
+    // Scan on this transition so disabling native mode restores the fallback.
+    LINUX_ScanInputDevices();
+}
+
 static void LINUX_JoystickDetect(void)
 {
+    LINUX_ReconcileFlydigiDevices();
 #ifdef SDL_USE_LIBUDEV
     if (enumeration_method == ENUMERATION_LIBUDEV) {
         // Polling will happen in the main event loop

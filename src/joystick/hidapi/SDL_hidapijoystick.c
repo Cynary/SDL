@@ -801,6 +801,11 @@ bool HIDAPI_JoystickConnected(SDL_HIDAPI_Device *device, SDL_JoystickID *pJoysti
         *pJoystickID = joystickID;
     }
 
+#if defined(SDL_JOYSTICK_LINUX) && defined(SDL_JOYSTICK_HIDAPI_FLYDIGI)
+    if (device->vendor_id == USB_VENDOR_FLYDIGI_V2 && device->driver == &SDL_HIDAPI_DriverFlydigi) {
+        LINUX_RefreshFlydigiDevices();
+    }
+#endif
     SDL_PrivateJoystickAdded(joystickID);
 
     return true;
@@ -833,6 +838,11 @@ void HIDAPI_JoystickDisconnected(SDL_HIDAPI_Device *device, SDL_JoystickID joyst
 
             --SDL_HIDAPI_numjoysticks;
 
+#if defined(SDL_JOYSTICK_LINUX) && defined(SDL_JOYSTICK_HIDAPI_FLYDIGI)
+            if (device->vendor_id == USB_VENDOR_FLYDIGI_V2 && device->driver == &SDL_HIDAPI_DriverFlydigi) {
+                LINUX_RefreshFlydigiDevices();
+            }
+#endif
             if (!shutting_down) {
                 SDL_PrivateJoystickRemoved(joystickID);
             }
@@ -1335,12 +1345,19 @@ bool HIDAPI_IsDevicePresent(Uint16 vendor_id, Uint16 product_id, Uint16 version,
     for (device = SDL_HIDAPI_devices; device; device = device->next) {
         // The HIDAPI functionality will be available when the FlyDigi Space Station app has
         // enabled third party controller mapping, so the driver needs to be active to watch
-        // for that change. Since this is dynamic and we don't have a way to re-trigger device
-        // changes when that happens, we'll pretend the driver isn't available so the XInput
-        // interface will always show up (but won't have any input when the controller is in
-        // enhanced mode)
+        // for that change. Linux refreshes its fallback when availability changes.
+        // Other backends still keep XInput visible because they cannot yet re-enumerate
+        // it on these transitions (it receives no input in enhanced mode).
         if (device->vendor_id == USB_VENDOR_FLYDIGI_V2 && device->driver == &SDL_HIDAPI_DriverFlydigi) {
+#ifdef SDL_JOYSTICK_LINUX
+            // Linux re-enumerates evdev when native availability changes. Only
+            // claim it once the native controller is actually available.
+            if (device->num_joysticks == 0) {
+                continue;
+            }
+#else
             continue;
+#endif
         }
 
         if (device->driver &&

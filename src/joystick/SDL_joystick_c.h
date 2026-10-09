@@ -284,6 +284,11 @@ extern void SDL_LoadVIDPIDListFromHints(SDL_vidpid_list *list, const char *inclu
 extern bool SDL_VIDPIDInList(Uint16 vendor_id, Uint16 product_id, const SDL_vidpid_list *list);
 extern void SDL_FreeVIDPIDList(SDL_vidpid_list *list);
 
+#ifdef SDL_JOYSTICK_LINUX
+// Reconcile evdev devices after a native Flydigi interface changes availability.
+extern void LINUX_RefreshFlydigiDevices(void);
+#endif
+
 // Ends C function definitions when using C++
 #ifdef __cplusplus
 }
