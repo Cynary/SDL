@@ -29,3 +29,23 @@ be tested. Multiple identical receivers have not been tested. The existing HID
 backend matches devices by vendor/product; this change retains that limitation.
 
 Written with Codex and kept in this fork; no upstream contribution is proposed.
+
+## Controller off when Steam starts
+
+A later physical test found a separate startup failure: Steam had no open fd for
+its Flydigi HID interface, while the receiver retained native permission. Only
+the generic Xbox pad appeared. The synchronous initialization had failed while
+the controller was off and the driver was detached; turning the wireless
+controller on does not re-enumerate its USB receiver.
+
+V2 initialization now waits for replies in the normal nonblocking report loop.
+Until it has a valid identity and an open native joystick, it makes bounded-rate
+information/status queries (at most one discovery round per second). Firmware
+version validation precedes native availability, and recovery does not alter
+the user's native permission setting. An open joystick retains its existing
+heartbeat. `replay-flydigi-reconnect.py` checks delayed initialization, validation,
+query timing and suppression of discovery traffic while the joystick is open.
+
+The live candidate loaded successfully and restored one native Steam controller
+and roughly 500 raw reports per second. Physical off/on and startup with the
+controller off still require validation before rebuilding/promoting the image.

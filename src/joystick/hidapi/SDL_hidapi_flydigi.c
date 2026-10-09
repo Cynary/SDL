@@ -85,6 +85,8 @@ typedef struct
     SDL_HIDAPI_Device *device;
     Uint8 deviceID;
     bool available;
+    bool initialized_v2;
+    Uint64 next_discovery_query;
     bool has_cz;
     bool has_lmrm;
     bool has_circle;
@@ -505,16 +507,12 @@ static void HIDAPI_DriverFlydigi_HandleAcquireResponse(SDL_HIDAPI_Device *device
     }
 }
 
-static bool HIDAPI_DriverFlydigi_InitControllerV2(SDL_HIDAPI_Device *device)
+static bool HIDAPI_DriverFlydigi_InitInfoV2(SDL_HIDAPI_Device *device, Uint8 *data, int size)
 {
     SDL_DriverFlydigi_Context *ctx = (SDL_DriverFlydigi_Context *)device->context;
 
-    Uint8 data[USB_PACKET_LENGTH];
-    if (!SDL_HIDAPI_Flydigi_SendInfoRequest(device)) {
+    if (size < 31) {
         return false;
-    }
-    if (!GetReply(device, FLYDIGI_V2_GET_INFO_COMMAND, data, sizeof(data))) {
-        return SDL_SetError("Couldn't get controller info");
     }
 
     // Check the firmware version
@@ -554,9 +552,21 @@ static bool HIDAPI_DriverFlydigi_InitControllerV2(SDL_HIDAPI_Device *device)
 
     HIDAPI_DriverFlydigi_UpdateDeviceIdentity(device);
 
-    // See whether we can acquire the controller
+    ctx->initialized_v2 = true;
+    // See whether we can acquire the controller.
     SDL_HIDAPI_Flydigi_SendStatusRequest(device);
 
+    return true;
+}
+
+static bool HIDAPI_DriverFlydigi_InitControllerV2(SDL_HIDAPI_Device *device)
+{
+    // A wireless receiver can enumerate while the controller is off. Keep the
+    // driver attached and initialize asynchronously when its replies arrive.
+    // A missing reply must not leave this receiver permanently on XInput.
+    SDL_DriverFlydigi_Context *ctx = (SDL_DriverFlydigi_Context *)device->context;
+    SDL_HIDAPI_Flydigi_SendInfoRequest(device);
+    ctx->next_discovery_query = SDL_GetTicks() + 1000;
     return true;
 }
 
@@ -974,6 +984,9 @@ static void HIDAPI_DriverFlydigi_HandlePacketV2(SDL_Joystick *joystick, SDL_Driv
 
     switch (data[2]) {
     case FLYDIGI_V2_GET_INFO_COMMAND:
+        if (!ctx->initialized_v2) {
+            HIDAPI_DriverFlydigi_InitInfoV2(ctx->device, data, size);
+        }
         if (joystick) {
             HIDAPI_DriverFlydigi_HandleInfoResponse(joystick, ctx, data, size);
         }
@@ -982,7 +995,9 @@ static void HIDAPI_DriverFlydigi_HandlePacketV2(SDL_Joystick *joystick, SDL_Driv
         HIDAPI_DriverFlydigi_HandleStatusUpdate(ctx->device, data, size);
         break;
     case FLYDIGI_V2_GET_STATUS_COMMAND:
-        HIDAPI_DriverFlydigi_HandleStatusResponse(ctx->device, data, size);
+        if (ctx->initialized_v2) {
+            HIDAPI_DriverFlydigi_HandleStatusResponse(ctx->device, data, size);
+        }
         break;
     case FLYDIGI_V2_ACQUIRE_CONTROLLER_COMMAND:
         HIDAPI_DriverFlydigi_HandleAcquireResponse(ctx->device, data, size);
@@ -1008,6 +1023,18 @@ static bool HIDAPI_DriverFlydigi_UpdateDevice(SDL_HIDAPI_Device *device)
 
     if (device->num_joysticks > 0) {
         joystick = SDL_GetJoystickFromID(device->joysticks[0]);
+    }
+
+    if (device->vendor_id == USB_VENDOR_FLYDIGI_V2 && !joystick &&
+        now >= ctx->next_discovery_query) {
+        // Recover missed initialization/status notifications without blocking
+        // the event loop. Alternating queries also avoids firmware suppression
+        // of consecutive identical requests. Never change native permission.
+        SDL_HIDAPI_Flydigi_SendInfoRequest(device);
+        if (ctx->initialized_v2) {
+            SDL_HIDAPI_Flydigi_SendStatusRequest(device);
+        }
+        ctx->next_discovery_query = now + 1000;
     }
 
     if (device->vendor_id == USB_VENDOR_FLYDIGI_V2 && joystick) {
