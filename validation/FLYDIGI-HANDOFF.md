@@ -72,3 +72,31 @@ only ten discovery rounds during a ten-second capture. At that point identity
 replies were present, but mapping-status replies and raw input remained absent;
 physical recovery was not yet confirmed. Do not interpret the bounded traffic
 check as a successful reconnect test.
+
+## Battery reporting and power-off menu
+
+The receiver reported battery byte `00` once during reconnect, then `02` (40%)
+1.164 seconds later. Steam warns below 20%, so this transient is a plausible
+source of the reported warning. We did not capture the warning itself and
+cannot explain the earlier full indication from this sample.
+
+Cache identity-reply battery data before the joystick opens. A native probe
+previously showed unknown for 41 ms before reporting 40%; the changed build
+reports 40% on its first observation. Unknown states use -1 rather than 0.
+Before publishing an empty battery, request confirmation after two seconds.
+A sustained zero still gets reported. The extra query is attempted once even
+if it fails; ordinary heartbeat requests remain available. Other battery
+levels and charging changes publish immediately.
+
+`python3 validation/replay-flydigi-battery.py` exercises initial caching,
+the captured zero-to-40% sequence, sustained zero, failed queries, unknown
+state and charging transitions. The native 32-bit build and physical probe
+passed. This is not a discharge/capacity calibration; firmware levels are
+coarse 20% steps.
+
+Steam's Turn Off Controller call emitted no USB output in a five-second capture
+while input continued. There is no power-off operation in this SDL driver.
+The examined Flydigi SDK has only legacy XInput/DInput sleep implementations,
+not a dedicated NewXInput implementation. Do not send NewXInput command 0x16
+as a guessed sleep command: it changes joystick sensitivity in that protocol.
+The Steam menu is therefore not implemented for this device in this setup.

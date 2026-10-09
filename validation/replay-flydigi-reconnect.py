@@ -11,7 +11,7 @@ a=s.index('    if (device->vendor_id == USB_VENDOR_FLYDIGI_V2 && !joystick &&')
 b=s.index('    if (device->vendor_id == USB_VENDOR_FLYDIGI_V2 && joystick)',a)
 recovery=s[a:b]
 a=b
-b=s.index('    while ((size =',a)
+b=s.index('    HIDAPI_DriverFlydigi_ConfirmBattery(',a)
 heartbeat=s[a:b]
 preamble=r'''
 #include <assert.h>

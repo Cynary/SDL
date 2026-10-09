@@ -101,6 +101,10 @@ typedef struct
     float gyroScale;
     Uint64 next_heartbeat;
     Uint64 last_heartbeat;
+    bool battery_valid;
+    Uint8 battery_raw;
+    Uint64 battery_zero_deadline;
+    bool battery_zero_query_sent;
     Uint64 last_packet;
     Uint8 last_state[USB_PACKET_LENGTH];
 } SDL_DriverFlydigi_Context;
@@ -426,12 +430,15 @@ static bool SDL_HIDAPI_Flydigi_SendInfoRequest(SDL_HIDAPI_Device *device)
     return true;
 }
 
-static void HIDAPI_DriverFlydigi_HandleInfoResponse(SDL_Joystick *joystick, SDL_DriverFlydigi_Context *ctx, Uint8 *data, int size)
+static void HIDAPI_DriverFlydigi_SendCachedPowerInfo(SDL_Joystick *joystick, SDL_DriverFlydigi_Context *ctx)
 {
+    if (!ctx->battery_valid || !joystick) {
+        return;
+    }
     SDL_PowerState state;
     int percent;
-    Uint8 status = (data[11] >> 4) & 0x0F;
-    Uint8 level = (data[11] & 0x0F);
+    Uint8 status = (ctx->battery_raw >> 4) & 0x0F;
+    Uint8 level = (ctx->battery_raw & 0x0F);
 
     switch (status) {
     case 0:
@@ -448,10 +455,45 @@ static void HIDAPI_DriverFlydigi_HandleInfoResponse(SDL_Joystick *joystick, SDL_
         break;
     default:
         state = SDL_POWERSTATE_UNKNOWN;
-        percent = 0;
+        percent = -1;
         break;
     }
     SDL_SendJoystickPowerInfo(joystick, state, percent);
+}
+
+static void HIDAPI_DriverFlydigi_HandleInfoResponse(SDL_Joystick *joystick, SDL_DriverFlydigi_Context *ctx, Uint8 *data, int size)
+{
+    // The receiver can briefly report an empty battery during reconnect (a
+    // captured reply returned to 40% 1.16 seconds later). Confirm zero after
+    // two seconds; do not hide a sustained empty reading or delay other levels.
+    if (data[11] == 0 && (!ctx->battery_valid || ctx->battery_raw != 0)) {
+        if (!ctx->battery_zero_deadline) {
+            ctx->battery_zero_deadline = SDL_GetTicks() + 2000;
+            ctx->battery_zero_query_sent = false;
+            return;
+        }
+        if (SDL_GetTicks() < ctx->battery_zero_deadline) {
+            return;
+        }
+    }
+    ctx->battery_zero_deadline = 0;
+    ctx->battery_zero_query_sent = false;
+
+    // The identity reply arrives before the joystick is opened. Preserve its
+    // battery reading instead of waiting for the next heartbeat to publish it.
+    ctx->battery_raw = data[11];
+    ctx->battery_valid = true;
+    HIDAPI_DriverFlydigi_SendCachedPowerInfo(joystick, ctx);
+}
+
+static void HIDAPI_DriverFlydigi_ConfirmBattery(SDL_HIDAPI_Device *device, Uint64 now)
+{
+    SDL_DriverFlydigi_Context *ctx = (SDL_DriverFlydigi_Context *)device->context;
+    if (ctx->battery_zero_deadline && now >= ctx->battery_zero_deadline &&
+        !ctx->battery_zero_query_sent) {
+        ctx->battery_zero_query_sent = true;
+        SDL_HIDAPI_Flydigi_SendInfoRequest(device);
+    }
 }
 
 static bool SDL_HIDAPI_Flydigi_SendStatusRequest(SDL_HIDAPI_Device *device)
@@ -601,6 +643,8 @@ static bool HIDAPI_DriverFlydigi_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joy
     SDL_AssertJoysticksLocked();
 
     SDL_zeroa(ctx->last_state);
+
+    HIDAPI_DriverFlydigi_SendCachedPowerInfo(joystick, ctx);
 
     // Initialize the joystick capabilities
     joystick->nbuttons = SDL_GAMEPAD_NUM_BASE_FLYDIGI_BUTTONS;
@@ -985,7 +1029,7 @@ static void HIDAPI_DriverFlydigi_HandlePacketV2(SDL_Joystick *joystick, SDL_Driv
         if (!ctx->initialized_v2) {
             HIDAPI_DriverFlydigi_InitInfoV2(ctx->device, data, size);
         }
-        if (joystick) {
+        if (ctx->initialized_v2) {
             HIDAPI_DriverFlydigi_HandleInfoResponse(joystick, ctx, data, size);
         }
         break;
@@ -1051,6 +1095,8 @@ static bool HIDAPI_DriverFlydigi_UpdateDevice(SDL_HIDAPI_Device *device)
             ctx->next_heartbeat = now + FLYDIGI_ACQUIRE_CONTROLLER_HEARTBEAT_TIME;
         }
     }
+
+    HIDAPI_DriverFlydigi_ConfirmBattery(device, now);
 
     while ((size = SDL_hid_read_timeout(device->dev, data, sizeof(data), 0)) > 0) {
 #ifdef DEBUG_FLYDIGI_PROTOCOL
