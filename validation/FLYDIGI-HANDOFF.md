@@ -144,3 +144,21 @@ USB packet or advertise end-to-end support before those checks.
 
 Changes are kept in Cynary's fork. SDL upstream does not accept AI-generated
 contributions; no upstream PR is being submitted.
+
+## Vader 5 motion input
+
+On 2026-10-09 the installed driver exposed gyro capability to Steam. Steam's
+own input-state feed reported gyro speed, acceleration and an integrated
+orientation quaternion. Sensor delta time was 2000 microseconds; the passive
+native capture received 21,343 reports over 45 seconds (474 reports/s), and
+Steam's sampled estimate was 486 reports/s. These are delivery counts, not a
+measurement of the USB polling interval. The controller was mostly stationary;
+physical axis directions and gyro-to-mouse gameplay remain to be checked.
+
+Sensor capability registration used the Vader 4 wireless rate (1000 Hz) even
+for Vader 5, whose timestamp step is 2 ms. It now derives the advertised rate
+from the already selected model/connection timestamp step. This changes metadata,
+not timestamp progression or raw data conversion. The actual V2 parser replay
+now checks gyro/acceleration axes, physical units, timestamp increments and
+sensor-disable behavior. Button, reconnect, battery and rumble replays pass.
+The 32-bit library compiled successfully; it has not replaced the running one.

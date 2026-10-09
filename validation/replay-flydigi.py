@@ -33,6 +33,10 @@ preamble=r'''
 #undef SDL_memcpy
 #define SDL_memcpy memcpy
 static bool buttons[21];
+static float sensors[2][3];
+static Uint64 sensor_times[2];
+static int sensor_events;
+
 typedef struct {
     Uint8 last_state[64];
     bool has_cz,has_lmrm,has_circle,has_turbo,sensors_enabled;
@@ -42,7 +46,10 @@ typedef struct {
 Uint64 SDL_GetTicksNS(void) {return 1;}
 static void SDL_SendJoystickHat(Uint64 t,SDL_Joystick*j,Uint8 h,Uint8 v) {}
 static void SDL_SendJoystickAxis(Uint64 t,SDL_Joystick*j,Uint8 a,Sint16 v) {}
-static void SDL_SendJoystickSensor(Uint64 t,SDL_Joystick*j,SDL_SensorType s,Uint64 st,const float*v,int n) {}
+static void SDL_SendJoystickSensor(Uint64 t,SDL_Joystick*j,SDL_SensorType s,Uint64 st,const float*v,int n) {
+    int index=s==SDL_SENSOR_GYRO?0:1;assert(n==3);
+    memcpy(sensors[index],v,3*sizeof(float));sensor_times[index]=st;sensor_events++;
+}
 static void SDL_SendJoystickButton(Uint64 t,SDL_Joystick*j,Uint8 b,bool v) {assert(b<21);buttons[b]=v;}
 static float HIDAPI_RemapVal(float a,float b,float c,float d,float e) {return d+(a-b)*(e-d)/(c-b);}
 '''
@@ -71,6 +78,30 @@ int main(void) {
     }
     packet[13]=0;
     HIDAPI_DriverFlydigi_HandleStatePacketV2(NULL,&ctx,packet,32);check(0,0);
+    // Sensor axes/units and timestamps through the same parser Steam uses.
+    ctx.sensors_enabled=true;ctx.sensor_timestamp_step_ns=2000000;
+    ctx.sensor_timestamp_ns=1000000000;ctx.gyroScale=34.906585f;
+    ctx.accelScale=9.80665f/4096.0f;
+    packet[17]=0;packet[18]=0x40; // +1000 deg/s pitch
+    packet[19]=0;packet[20]=0xc0; // -1000 deg/s device Y -> positive SDL Z
+    packet[21]=0;packet[22]=0x20; // +500 deg/s SDL Y
+    packet[23]=0;packet[24]=0x10; // +1 g SDL X
+    packet[25]=0;packet[26]=0xf0; // -1 g device Y -> positive SDL Z
+    packet[27]=0;packet[28]=0x08; // +0.5 g SDL Y
+    HIDAPI_DriverFlydigi_HandleStatePacketV2(NULL,&ctx,packet,32);
+    assert(sensor_events==2 && sensor_times[0]==1000000000 && sensor_times[1]==1000000000);
+    assert(sensors[0][0]>17.45f && sensors[0][0]<17.46f);
+    assert(sensors[0][1]>8.72f && sensors[0][1]<8.73f);
+    assert(sensors[0][2]>17.45f && sensors[0][2]<17.46f);
+    assert(sensors[1][0]>9.8f && sensors[1][0]<9.81f);
+    assert(sensors[1][1]>4.90f && sensors[1][1]<4.91f);
+    assert(sensors[1][2]>9.8f && sensors[1][2]<9.81f);
+    HIDAPI_DriverFlydigi_HandleStatePacketV2(NULL,&ctx,packet,32);
+    assert(sensor_events==4 && sensor_times[0]==1002000000 && sensor_times[1]==1002000000);
+    ctx.sensors_enabled=false;
+    HIDAPI_DriverFlydigi_HandleStatePacketV2(NULL,&ctx,packet,32);
+    assert(sensor_events==4);
+    printf("PASS: gyro/accel axes, units, 2 ms timestamps and disabled sensors\n");
     printf("PASS: %u mixed, repeated and release reports; Turbo and Fn independent; existing extras unchanged\n",count+1);
 }
 '''
